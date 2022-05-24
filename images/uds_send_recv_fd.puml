@@ -1,0 +1,41 @@
+@startuml
+skinparam sequenceMessageAlign center
+skinparam DefaultTextAlignment center
+skinparam linetype polyline
+
+rectangle Server1{
+rectangle "LISTEN & ACCEPT\nTCP:1000" as tcp1_listen
+rectangle "READ" as tcp1_read
+rectangle "WRITE" as tcp1_write
+rectangle "UDS Send fd" as uds1_send
+rectangle "UDS Recv fd" as uds1_recv
+}
+
+tcp1_listen-right->tcp1_read
+tcp1_read-down->tcp1_write
+tcp1_write-down->uds1_send
+uds1_recv-down->tcp1_read
+
+rectangle Server2{
+
+rectangle "LISTEN & ACCEPT\nTCP:1001" as tcp2_listen
+rectangle "READ" as tcp2_read
+rectangle "WRITE" as tcp2_write
+rectangle "UDS Send fd" as uds2_send
+rectangle "UDS Recv fd" as uds2_recv
+
+}
+
+tcp2_listen-left->tcp2_read
+tcp2_read-up->tcp2_write
+tcp2_write-up->uds2_send
+uds2_recv-up->tcp2_read
+
+uds1_send-right-->uds2_recv
+tcp1_read-[hidden]right--->tcp2_write
+tcp2_read-[hidden]left--->tcp1_write
+uds2_send-left-->uds1_recv
+
+
+
+@enduml
