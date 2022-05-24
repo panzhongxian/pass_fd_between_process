@@ -1,8 +1,6 @@
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include <event2/event.h>
-#include <stddef.h>
-#include <stdlib.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -10,12 +8,18 @@ extern "C" {
 #include "apue_send_recv_fd/apue.h"
 }
 
+using std::string;
+
 struct event_base* base;
 int g_server_port;
 
-void do_write(evutil_socket_t fd, short, void* arg) {
-  printf("do_write\n");
-  struct event* event_self = static_cast<event*>(arg);
+string get_uds_name(bool pair_flag) {
+  int port = pair_flag ? (g_server_port ^ 1) : g_server_port;
+  return "test_server_port_01_" + std::to_string(port);
+}
+
+void do_tcp_write(evutil_socket_t fd, short, void* arg) {
+  auto event_self = static_cast<event*>(arg);
   char buffer[256];
   int len = snprintf(buffer, sizeof(buffer), "rsp from port: %d\n", g_server_port);
   if (send(fd, buffer, len - 1, 0) < 0) {
@@ -23,30 +27,21 @@ void do_write(evutil_socket_t fd, short, void* arg) {
     _exit(0);
   }
 
-  // TODO(jasonzxpan) send fd to another server
-  char uds_name[256];
-  snprintf(uds_name, 256, "test_server_port_01_%d", g_server_port ^ 1);
-  printf("connect to %s\n", uds_name);
-  struct sockaddr_un un;
+  sockaddr_un un{};
   un.sun_family = AF_UNIX;
-  strcpy(un.sun_path, uds_name);
+  strcpy(un.sun_path, get_uds_name(true).c_str());
   int uds_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (connect(uds_fd, (sockaddr*)&un, sizeof(sockaddr_un)) < 0) {
     perror("connect uds");
   }
-
-  printf("prepare send_fd\n");
   send_fd(uds_fd, fd);
   close(uds_fd);
   close(fd);
   event_del(event_self);
-  printf("finish send_fd\n");
-
-  return;
 }
 
-void do_read(evutil_socket_t fd, short, void* arg) {
-  struct event* event_self = static_cast<event*>(arg);
+void do_tcp_read(evutil_socket_t fd, short, void* arg) {
+  auto event_self = static_cast<event*>(arg);
   char len = 0;
   int ret = recv(fd, &len, 1, 0);
   if (ret < 0) {
@@ -60,7 +55,6 @@ void do_read(evutil_socket_t fd, short, void* arg) {
   }
   char buffer[256];
   char remaining = len;
-  printf("len: %d\n", len);
 
   while (true) {
     int curr_len = recv(fd, buffer, remaining, 0);
@@ -81,15 +75,14 @@ void do_read(evutil_socket_t fd, short, void* arg) {
   printf("len: %d, content: %.*s\n", len, len, buffer);
 
   // 删除 读事件，避免无法结束
-  auto write_event = event_new(base, fd, EV_WRITE, do_write, event_self_cbarg());
-  printf("add do_write\n");
+  auto write_event = event_new(base, fd, EV_WRITE, do_tcp_write, event_self_cbarg());
   event_add(write_event, NULL);
   event_del(event_self);
   // TODO(jasonzxpan) send to another server
 }
 
-void do_accept(evutil_socket_t listener, short event, void* arg) {
-  struct sockaddr_storage ss;
+void do_tcp_accept(evutil_socket_t listener, short event, void* arg) {
+  sockaddr_storage ss{};
   socklen_t slen = sizeof(ss);
   int fd = accept(listener, (struct sockaddr*)&ss, &slen);
   if (fd < 0) {
@@ -98,14 +91,12 @@ void do_accept(evutil_socket_t listener, short event, void* arg) {
     close(fd);
   } else {
     evutil_make_socket_nonblocking(fd);
-    auto read_event = event_new(base, fd, EV_READ, do_read, event_self_cbarg());
-    printf("add do_read\n");
+    auto read_event = event_new(base, fd, EV_READ, do_tcp_read, event_self_cbarg());
     event_add(read_event, NULL);
   }
 }
 
-void do_uds_read(evutil_socket_t fd, short event, void* arg) {
-  printf("do_uds_read\n");
+void do_uds_read(evutil_socket_t fd, short , void* ) {
   int tcp_fd = recv_fd(fd, write);
   if (tcp_fd < 0) {
     perror("accept");
@@ -113,16 +104,14 @@ void do_uds_read(evutil_socket_t fd, short event, void* arg) {
     close(tcp_fd);
   } else {
     close(fd);
-    printf("Get tcp_fd\n");
     evutil_make_socket_nonblocking(tcp_fd);
-    auto read_event = event_new(base, tcp_fd, EV_READ, do_read, event_self_cbarg());
+    auto read_event = event_new(base, tcp_fd, EV_READ, do_tcp_read, event_self_cbarg());
     event_add(read_event, NULL);
   }
 }
 
-void do_uds_accept(evutil_socket_t listener, short event, void* arg) {
-  printf("do_uds_accept\n");
-  struct sockaddr_un un;
+void do_uds_accept(evutil_socket_t listener, short, void*) {
+  sockaddr_un un{};
   socklen_t slen = sizeof(un);
   int fd = accept(listener, (struct sockaddr*)&un, &slen);
   if (fd < 0) {
@@ -137,33 +126,36 @@ void do_uds_accept(evutil_socket_t listener, short event, void* arg) {
 }
 
 int main(int argc, char* argv[]) {
-  struct sockaddr_in sin;
-  base = event_base_new();
-  if (!base) return 1;
-  sin.sin_family = AF_INET;
-  sin.sin_addr.s_addr = 0;  // TODO(jasonzxpan): use ip in config
   g_server_port = atoi(argv[1]);
+
+  struct sockaddr_in sin {};
+  base = event_base_new();
+  if (!base) {
+    return 1;
+  }
+
+  // 创建socket监听TCP端口
+  sin.sin_family = AF_INET;
+  sin.sin_addr.s_addr = 0;
   sin.sin_port = htons(g_server_port);
   int tcp_fd = socket(AF_INET, SOCK_STREAM, 0);
   evutil_make_socket_nonblocking(tcp_fd);
   if (bind(tcp_fd, (struct sockaddr*)&sin, sizeof(sin)) < 0) {
-    perror("bind1");
+    perror("bind tcp port");
     return 0;
   }
-
   if (listen(tcp_fd, 100) < 0) {
-    perror("listen");
+    perror("listen on tcp port");
     return 0;
   }
 
-  auto tcp_listen_event = event_new(base, tcp_fd, EV_TIMEOUT | EV_READ | EV_PERSIST, do_accept, (void*)base);
+  auto tcp_listen_event = event_new(base, tcp_fd, EV_READ | EV_PERSIST, do_tcp_accept, (void*)base);
   event_add(tcp_listen_event, NULL);
 
-  char uds_name[256];
-  snprintf(uds_name, 256, "test_server_port_01_%d", g_server_port);
-  struct sockaddr_un un;
+  // 创建UDS
+  sockaddr_un un{};
   un.sun_family = AF_UNIX;
-  strcpy(un.sun_path, uds_name);
+  strcpy(un.sun_path, get_uds_name(false).c_str());
   int uds_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (uds_fd < 0) {
     perror("uds_fd");
@@ -171,13 +163,12 @@ int main(int argc, char* argv[]) {
   }
   evutil_make_socket_nonblocking(uds_fd);
   int size = offsetof(struct sockaddr_un, sun_path) + strlen(un.sun_path);
-  printf("size: %d\n", size);
   if (bind(uds_fd, (struct sockaddr*)&un, size) < 0) {
-    perror("bind2");
+    perror("bind uds address");
     return 0;
   }
   if (listen(uds_fd, 100) < 0) {
-    perror("listen");
+    perror("listen on uds address");
     return 0;
   }
 
