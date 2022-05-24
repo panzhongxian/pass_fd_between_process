@@ -1,0 +1,9 @@
+config.yml
+.vscode
+bazel-*
+tmp
+libgamelet_console_log_json_parser.so
+*.log
+.idea
+cpplint.log
+.clwb
