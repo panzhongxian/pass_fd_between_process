@@ -1,8 +1,16 @@
 ## 进程间传输文件描述符
 
+通过实验模拟两个server之间进行 fd 的传输，依赖 libevent 和 apue 示例代码。
 
+### server
 
-### 两个 server
+server 的具体逻辑：
+
+- 创建 socket 监听 TCP 端口
+- accept 建立客户端连接
+- 从连接上读一个请求（可能一次性发多个逻辑请求）
+- 在该连接上发送返回，标识是哪个server
+- 将 fd 传递给另外一个server进行后续处理
 
 调用 `sh start_server.sh` 会构建 server 程序，并拉起两个进程，分别监听 1000 和 1001 端口，同时会创建并监听对应端口的一个命名 UDS：
 
