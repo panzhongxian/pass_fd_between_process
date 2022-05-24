@@ -4,6 +4,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <string>
+
 extern "C" {
 #include "apue_send_recv_fd/apue.h"
 }
@@ -96,7 +98,7 @@ void do_tcp_accept(evutil_socket_t listener, short event, void* arg) {
   }
 }
 
-void do_uds_read(evutil_socket_t fd, short , void* ) {
+void do_uds_read(evutil_socket_t fd, short, void*) {
   int tcp_fd = recv_fd(fd, write);
   if (tcp_fd < 0) {
     perror("accept");

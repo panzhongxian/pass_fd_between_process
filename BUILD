@@ -11,6 +11,26 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "unary_client",
+    srcs = [
+        "unary_client.cc",
+    ],
+    deps = [
+        ":libevent",
+    ],
+)
+
+cc_binary(
+    name = "stream_client",
+    srcs = [
+        "stream_client.cc",
+    ],
+    deps = [
+        ":libevent",
+    ],
+)
+
 # https://github.com/libevent/libevent/blob/master/Documentation/Building.md#cmake-variables
 cmake(
     name = "libevent",
