@@ -17,7 +17,7 @@ int g_server_port;
 
 string get_uds_name(bool pair_flag) {
   int port = pair_flag ? (g_server_port ^ 1) : g_server_port;
-  return "test_server_port_01_" + std::to_string(port);
+  return "test_server_" + std::to_string(port);
 }
 
 void do_tcp_write(evutil_socket_t fd, short, void* arg) {
